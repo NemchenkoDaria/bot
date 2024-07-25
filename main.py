@@ -45,18 +45,22 @@ async def right_answer(callback: types.CallbackQuery):
     )
     
     current_question_index = await get_quiz_index(callback.from_user.id)
+    right_answers = await get_right_answers(callback.from_user.id)
     correct_option = quiz_data[current_question_index]['correct_option']
     await callback.message.answer(f"Верно! Ваш ответ: {quiz_data[current_question_index]['options'][correct_option]}")
 
     # Обновление номера текущего вопроса в базе данных
     current_question_index += 1
-    await update_quiz_index(callback.from_user.id, current_question_index)
+    right_answers += 1
+    await update_quiz_index(callback.from_user.id, current_question_index, right_answers)
 
 
     if current_question_index < len(quiz_data):
         await get_question(callback.message, callback.from_user.id)
     else:
+        right_answers = await get_right_answers(callback.from_user.id)
         await callback.message.answer("Это был последний вопрос. Квиз завершен!")
+        await callback.message.answer(f"Вы ответили правильно на {right_answers} из {len(quiz_data)} вопросов.")
 
 
 @dp.callback_query(F.data == "wrong_answer")
@@ -69,19 +73,23 @@ async def wrong_answer(callback: types.CallbackQuery):
 
     # Получение текущего вопроса из словаря состояний пользователя
     current_question_index = await get_quiz_index(callback.from_user.id)
+    right_answers = await get_right_answers(callback.from_user.id)
     correct_option = quiz_data[current_question_index]['correct_option']
 
     await callback.message.answer(f"Неправильно. Правильный ответ: {quiz_data[current_question_index]['options'][correct_option]}")
 
     # Обновление номера текущего вопроса в базе данных
     current_question_index += 1
-    await update_quiz_index(callback.from_user.id, current_question_index)
+    right_answers += 0
+    await update_quiz_index(callback.from_user.id, current_question_index,right_answers)
 
 
     if current_question_index < len(quiz_data):
         await get_question(callback.message, callback.from_user.id)
     else:
+        right_answers = await get_right_answers(callback.from_user.id)
         await callback.message.answer("Это был последний вопрос. Квиз завершен!")
+        await callback.message.answer(f"Вы ответили правильно на {right_answers} из {len(quiz_data)} вопросов.")
 
 async def get_question(message, user_id):
 
@@ -96,7 +104,8 @@ async def get_question(message, user_id):
 async def new_quiz(message):
     user_id = message.from_user.id
     current_question_index = 0
-    await update_quiz_index(user_id, current_question_index)
+    right_answers = 0
+    await update_quiz_index(user_id, current_question_index, right_answers)
     await get_question(message, user_id)
 
 
@@ -112,12 +121,23 @@ async def get_quiz_index(user_id):
             else:
                 return 0
 
-
-async def update_quiz_index(user_id, index):
+async def get_right_answers(user_id):
+    # Подключаемся к базе данных
+    async with aiosqlite.connect(DB_NAME) as db:
+        # Получаем запись для заданного пользователя
+        async with db.execute('SELECT right_answers FROM quiz_state WHERE user_id = (?)', (user_id,)) as cursor:
+            # Возвращаем результат
+            results = await cursor.fetchone()
+            if results is not None:
+                return results[0]
+            else:
+                return 0
+            
+async def update_quiz_index(user_id, index, right_answers):
     # Создаем соединение с базой данных (если она не существует, она будет создана)
     async with aiosqlite.connect(DB_NAME) as db:
         # Вставляем новую запись или заменяем ее, если с данным user_id уже существует
-        await db.execute('INSERT OR REPLACE INTO quiz_state (user_id, question_index) VALUES (?, ?)', (user_id, index))
+        await db.execute('INSERT OR REPLACE INTO quiz_state (user_id, question_index, right_answers) VALUES (?, ?, ?)', (user_id, index, right_answers))
         # Сохраняем изменения
         await db.commit()
 
@@ -125,7 +145,7 @@ async def create_table():
     # Создаем соединение с базой данных (если она не существует, она будет создана)
     async with aiosqlite.connect(DB_NAME) as db:
         # Создаем таблицу
-        await db.execute('''CREATE TABLE IF NOT EXISTS quiz_state (user_id INTEGER PRIMARY KEY, question_index INTEGER)''')
+        await db.execute('''CREATE TABLE IF NOT EXISTS quiz_state (user_id INTEGER PRIMARY KEY, question_index INTEGER, right_answers INTEGER)''')
         # Сохраняем изменения
         await db.commit()
 
